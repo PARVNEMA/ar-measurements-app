@@ -11,8 +11,15 @@ import { CameraView, Camera } from 'expo-camera';
 import { StatusBar } from 'expo-status-bar';
 import MeasurementOverlay from '../../components/MeasurementOverlay';
 import { useARMeasurement, useCameraPermissions, useScreenshot } from '../../hooks/useARMeasurement';
-import { Point2D, pixelToRealWorld } from '../../utils/measurementUtils';
-import Svg, { Line, Circle } from 'react-native-svg';
+import {
+  Point2D,
+  pixelToRealWorld,
+  calculatePolygonArea,
+  convertPixelAreaToRealWorld,
+  formatArea,
+  calculateDistance2D
+} from '../../utils/measurementUtils';
+import Svg, { Line, Circle, Polygon } from 'react-native-svg';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -36,6 +43,11 @@ export default function SimpleMeasureScreen() {
   const [touchPosition, setTouchPosition] = useState<Point2D | null>(null);
   const [distanceToSurface, setDistanceToSurface] = useState(0.5); // Default 0.5m
 
+  // Area Mode State
+  const [mode, setMode] = useState<'line' | 'area'>('line');
+  const [areaPoints, setAreaPoints] = useState<Point2D[]>([]);
+  const [areaResult, setAreaResult] = useState<number | null>(null);
+
   useEffect(() => {
     requestPermission();
   }, []);
@@ -48,19 +60,23 @@ export default function SimpleMeasureScreen() {
       y: locationY,
     };
 
-    // If we already have one point, update the preview
-    if (points.length === 1) {
-      const firstPoint = points[0].position as Point2D;
-      const pixelDistance = Math.sqrt(
-        Math.pow(point.x - firstPoint.x, 2) + Math.pow(point.y - firstPoint.y, 2)
-      );
+    setTouchPosition(point);
 
-      // Convert pixel distance to real-world meters using improved formula
-      const realWorldDistance = pixelToRealWorld(pixelDistance, SCREEN_WIDTH, distanceToSurface);
+    if (mode === 'line') {
+      // If we already have one point, update the preview
+      if (points.length === 1) {
+        const firstPoint = points[0].position as Point2D;
+        const pixelDistance = calculateDistance2D(firstPoint, point);
 
-      // Pass the calculated distance to the hook
-      updateCurrentDistance({ x: 0, y: 0, z: realWorldDistance }, realWorldDistance);
-      setTouchPosition(point);
+        // Convert pixel distance to real-world meters using improved formula
+        const realWorldDistance = pixelToRealWorld(pixelDistance, SCREEN_WIDTH, distanceToSurface);
+
+        // Pass the calculated distance to the hook
+        updateCurrentDistance({ x: 0, y: 0, z: realWorldDistance }, realWorldDistance);
+      }
+    } else {
+      // Area Mode Preview
+      // (Optional: Could calculate potential area if 3rd point, etc.)
     }
   };
 
@@ -72,31 +88,63 @@ export default function SimpleMeasureScreen() {
       y: locationY,
     };
 
-    // Calculate real-world distance if this is the second point
-    if (points.length === 1) {
-      const firstPoint = points[0].position as Point2D;
-      const pixelDistance = Math.sqrt(
-        Math.pow(point.x - firstPoint.x, 2) + Math.pow(point.y - firstPoint.y, 2)
-      );
+    if (mode === 'line') {
+      // Calculate real-world distance if this is the second point
+      if (points.length === 1) {
+        const firstPoint = points[0].position as Point2D;
+        const pixelDistance = calculateDistance2D(firstPoint, point);
 
-      const realWorldDistance = pixelToRealWorld(pixelDistance, SCREEN_WIDTH, distanceToSurface);
+        const realWorldDistance = pixelToRealWorld(pixelDistance, SCREEN_WIDTH, distanceToSurface);
 
-      // Add point with calculated distance override
-      addPoint({ x: point.x, y: point.y, z: realWorldDistance }, realWorldDistance);
-      setTouchPosition(null);
+        // Add point with calculated distance override
+        addPoint({ x: point.x, y: point.y, z: realWorldDistance }, realWorldDistance);
+        setTouchPosition(null);
+      } else {
+        addPoint(point);
+      }
     } else {
-      addPoint(point);
+      // Area Mode
+      if (areaPoints.length < 4) {
+        const newPoints = [...areaPoints, point];
+        setAreaPoints(newPoints);
+
+        if (newPoints.length === 4) {
+          // Calculate Area
+          const pixelArea = calculatePolygonArea(newPoints);
+          const realArea = convertPixelAreaToRealWorld(pixelArea, SCREEN_WIDTH, distanceToSurface);
+          setAreaResult(realArea);
+          setTouchPosition(null);
+        }
+      }
     }
   };
 
   const handleReset = () => {
     reset();
+    setAreaPoints([]);
+    setAreaResult(null);
     setTouchPosition(null);
+  };
+
+  const handleToggleMode = () => {
+    handleReset();
+    setMode(prev => prev === 'line' ? 'area' : 'line');
   };
 
   const handleSave = async () => {
     if (viewRef.current) {
       await saveScreenshot(viewRef.current);
+    }
+  };
+
+  const getDisplayValue = () => {
+    if (mode === 'line') {
+      return getFormattedDistance(currentDistance);
+    } else {
+      if (areaResult !== null) {
+        return formatArea(areaResult, unit);
+      }
+      return '--';
     }
   };
 
@@ -112,6 +160,11 @@ export default function SimpleMeasureScreen() {
     );
     return <View style={styles.container} />;
   }
+
+  // Helper to get string of points for Polygon SVG
+  const getPolygonPoints = () => {
+    return areaPoints.map(p => `${p.x},${p.y}`).join(' ');
+  };
 
   return (
     <View style={styles.container} ref={viewRef}>
@@ -133,8 +186,9 @@ export default function SimpleMeasureScreen() {
       >
         {/* SVG overlay for drawing lines and points */}
         <Svg style={styles.svgOverlay}>
-          {/* Draw existing measurements */}
-          {measurements.map((measurement) => {
+
+          {/* --- Line Mode Render --- */}
+          {mode === 'line' && measurements.map((measurement) => {
             const start = measurement.startPoint.position as Point2D;
             const end = measurement.endPoint.position as Point2D;
 
@@ -155,8 +209,7 @@ export default function SimpleMeasureScreen() {
             );
           })}
 
-          {/* Draw current points */}
-          {points.map((point) => {
+          {mode === 'line' && points.map((point) => {
             const pos = point.position as Point2D;
             return (
               <Circle
@@ -171,8 +224,8 @@ export default function SimpleMeasureScreen() {
             );
           })}
 
-          {/* Draw preview line when placing second point */}
-          {points.length === 1 && touchPosition && (
+          {/* Line Mode Preview */}
+          {mode === 'line' && points.length === 1 && touchPosition && (
             <Line
               x1={(points[0].position as Point2D).x}
               y1={(points[0].position as Point2D).y}
@@ -185,21 +238,86 @@ export default function SimpleMeasureScreen() {
               opacity={0.7}
             />
           )}
+
+          {/* --- Area Mode Render --- */}
+          {mode === 'area' && (
+            <>
+              {/* Completed Polygon */}
+              {areaPoints.length === 4 && (
+                <Polygon
+                  points={getPolygonPoints()}
+                  fill="rgba(16, 185, 129, 0.3)"
+                  stroke="#10b981"
+                  strokeWidth="2"
+                />
+              )}
+
+              {/* Connecting Lines for incomplete shape */}
+              {areaPoints.map((p, index) => {
+                 if (index < areaPoints.length - 1) {
+                   const next = areaPoints[index + 1];
+                   return (
+                     <Line
+                       key={`line-${index}`}
+                       x1={p.x}
+                       y1={p.y}
+                       x2={next.x}
+                       y2={next.y}
+                       stroke="#10b981"
+                       strokeWidth="2"
+                     />
+                   );
+                 }
+                 return null;
+              })}
+
+              {/* Points */}
+              {areaPoints.map((p, index) => (
+                <Circle
+                  key={`p-${index}`}
+                  cx={p.x}
+                  cy={p.y}
+                  r="6"
+                  fill="#fbbf24" /* Amber for Area points */
+                  stroke="#ffffff"
+                  strokeWidth="2"
+                />
+              ))}
+
+              {/* Preview Line for Area */}
+              {areaPoints.length > 0 && areaPoints.length < 4 && touchPosition && (
+                 <Line
+                   x1={areaPoints[areaPoints.length - 1].x}
+                   y1={areaPoints[areaPoints.length - 1].y}
+                   x2={touchPosition.x}
+                   y2={touchPosition.y}
+                   stroke="#fbbf24"
+                   strokeWidth="2"
+                   strokeDasharray="5,5"
+                 />
+              )}
+
+              {/* Closing Preview (from cursor to start) if 3rd point placed (giving 4th) - optional, but nice */}
+            </>
+          )}
+
         </Svg>
       </TouchableOpacity>
 
       {/* Measurement UI Overlay */}
       <MeasurementOverlay
-        currentDistance={getFormattedDistance(currentDistance)}
+        currentDistance={getDisplayValue()}
         unit={unit}
         onReset={handleReset}
         onSave={handleSave}
         onToggleUnit={toggleUnit}
-        onAddPoint={() => {}} // Not used with touch interface
-        pointsCount={points.length}
+        onAddPoint={() => {}}
+        pointsCount={mode === 'line' ? points.length : areaPoints.length}
         isSaving={isSaving}
         distanceToSurface={distanceToSurface}
         onDistanceChange={setDistanceToSurface}
+        mode={mode}
+        onToggleMode={handleToggleMode}
       />
     </View>
   );

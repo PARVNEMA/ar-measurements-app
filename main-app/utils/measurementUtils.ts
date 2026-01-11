@@ -28,6 +28,7 @@ export function calculateDistance3D(point1: Point3D, point2: Point3D): number {
   return Math.sqrt(dx * dx + dy * dy + dz * dz);
 }
 
+
 /**
  * Calculate distance between two 2D points (for simplified version)
  */
@@ -36,6 +37,24 @@ export function calculateDistance2D(point1: Point2D, point2: Point2D): number {
   const dy = point2.y - point1.y;
 
   return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
+ * Calculate the area of a polygon using the Shoelace formula (2D)
+ */
+export function calculatePolygonArea(points: Point2D[]): number {
+  if (points.length < 3) return 0;
+
+  let area = 0;
+  const n = points.length;
+
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += points[i].x * points[j].y;
+    area -= points[j].x * points[i].y;
+  }
+
+  return Math.abs(area) / 2;
 }
 
 /**
@@ -99,6 +118,38 @@ export function formatDistance(
 }
 
 /**
+ * Format area for display based on unit preference
+ */
+export function formatArea(
+  areaInSquareMeters: number,
+  unit: MeasurementUnit = 'cm',
+  decimals: number = 2
+): string {
+  let value: number;
+  let unitLabel: string;
+
+  switch (unit) {
+    case 'cm':
+      // sq meters to sq cm: * 100 * 100
+      value = areaInSquareMeters * 10000;
+      unitLabel = 'cm²';
+      break;
+    case 'inch':
+      // sq meters to sq inches: * 39.3701 * 39.3701
+      value = areaInSquareMeters * 1550.0031;
+      unitLabel = 'in²';
+      break;
+    case 'm':
+    default:
+      value = areaInSquareMeters;
+      unitLabel = 'm²';
+      break;
+  }
+
+  return `${value.toFixed(decimals)} ${unitLabel}`;
+}
+
+/**
  * Estimate real-world distance from pixel distance
  * Uses the Pin-hole camera model approximation
  *
@@ -127,6 +178,33 @@ export function pixelToRealWorld(
 
   // result = proportion * total_width
   return screenProportion * visibleWidthAtDistance;
+}
+
+/**
+ * Convert pixel area to real-world area (m²)
+ * @param pixelArea Area in square pixels
+ * @param screenWidth Width of the screen in pixels
+ * @param distanceToSurface Estimated distance to surface in meters
+ * @param horizontalFov Horizontal FOV in degrees
+ */
+export function convertPixelAreaToRealWorld(
+  pixelArea: number,
+  screenWidth: number,
+  distanceToSurface: number = 0.5,
+  horizontalFov: number = 60
+): number {
+  // Get scale factor: RealMeters / Pixel
+  // RealWidth = ScaleFactor * PixelWidth  => ScaleFactor = RealWidth / PixelWidth
+  // RealArea = (ScaleFactor * PixelW) * (ScaleFactor * PixelH) = ScaleFactor^2 * PixelArea
+
+  // 1. Calculate how many meters one pixel represents at this distance (at the center/average)
+  // Re-use logic from pixelToRealWorld
+  const fovRad = (horizontalFov * Math.PI) / 180;
+  const visibleWidthAtDistance = 2 * distanceToSurface * Math.tan(fovRad / 2);
+  const metersPerPixel = visibleWidthAtDistance / screenWidth;
+
+  const areaInMeters = pixelArea * (metersPerPixel * metersPerPixel);
+  return areaInMeters;
 }
 
 /**

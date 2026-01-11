@@ -15,6 +15,8 @@ interface MeasurementOverlayProps {
   isSaving?: boolean;
   distanceToSurface: number;
   onDistanceChange: (newDistance: number) => void;
+  mode: 'line' | 'area';
+  onToggleMode: () => void;
 }
 
 const { width } = Dimensions.get('window');
@@ -30,6 +32,8 @@ export default function MeasurementOverlay({
   isSaving = false,
   distanceToSurface,
   onDistanceChange,
+  mode = 'line',
+  onToggleMode,
 }: MeasurementOverlayProps) {
 
   const adjustDistance = (delta: number) => {
@@ -48,8 +52,12 @@ export default function MeasurementOverlay({
           <Text style={styles.instructionText}>
             {pointsCount === 0
               ? 'Tap screen to start'
-              : pointsCount === 1
+              : (mode === 'line' && pointsCount === 1)
               ? 'Tap screen to end'
+              : (mode === 'area' && pointsCount < 3)
+              ? 'Tap to add points (min 3)'
+              : (mode === 'area' && pointsCount === 3)
+              ? 'Tap 4th point to finish'
               : 'Measurement complete'}
           </Text>
         </BlurView>
@@ -79,14 +87,18 @@ export default function MeasurementOverlay({
             style={styles.measurementCard}
           >
             <BlurView intensity={60} tint="dark" style={styles.measurementBlur}>
-              <Text style={styles.measurementLabel}>Distance</Text>
+              <Text style={styles.measurementLabel}>{mode === 'area' ? 'Area' : 'Distance'}</Text>
               <Text style={styles.measurementValue}>{currentDistance}</Text>
               <TouchableOpacity
                 onPress={onToggleUnit}
                 style={styles.unitToggle}
               >
                 <Text style={styles.unitText}>
-                  {unit === 'cm' ? 'Unit: CM' : 'Unit: IN'}
+                  {unit === 'cm'
+                    ? (mode === 'area' ? 'Unit: CM²' : 'Unit: CM')
+                    : unit === 'inch'
+                      ? (mode === 'area' ? 'Unit: IN²' : 'Unit: IN')
+                      : (mode === 'area' ? 'Unit: M²' : 'Unit: M')}
                 </Text>
               </TouchableOpacity>
             </BlurView>
@@ -104,6 +116,16 @@ export default function MeasurementOverlay({
           >
             <BlurView intensity={80} tint="dark" style={styles.circleButtonBlur}>
               <RotateCcw size={24} color="#ef4444" />
+            </BlurView>
+          </TouchableOpacity>
+
+          {/* Mode Toggle Button */}
+          <TouchableOpacity
+            onPress={onToggleMode}
+            style={styles.modeButton}
+          >
+            <BlurView intensity={80} tint="dark" style={styles.modeButtonBlur}>
+               <Text style={styles.modeButtonText}>{mode === 'line' ? 'LINE' : 'AREA'}</Text>
             </BlurView>
           </TouchableOpacity>
 
@@ -303,6 +325,25 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modeButton: {
+    height: 40,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  modeButtonBlur: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+  },
+  modeButtonText: {
+      color: '#ffffff',
+      fontWeight: '700',
+      fontSize: 12,
+      letterSpacing: 1,
   },
   mainActionButton: {
     width: 72,
